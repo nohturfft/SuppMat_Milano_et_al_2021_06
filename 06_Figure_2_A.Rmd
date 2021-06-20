@@ -1,0 +1,187 @@
+---
+title: "A novel role for alkyladenine DNA glycosylase in regulating alkylation-induced ER stress"
+subtitle: "Figure 1: Preparing expression data"
+author: "L Milano, CF Charlier, R Andreguetti, E Healing, MP Thomé, R Elliott, JY Masson, LD Samson, G Lenz, JAP Henriques, A Nohturfft and LB Meira"
+output:
+  html_notebook:
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 3
+    code_folding: "hide"
+    number_sections: FALSE
+    theme: "readable"
+    highlight: "tango"
+    fig_caption: TRUE
+    css: "./source/styles.css"
+---
+
+```{js}
+function myFunction(id) {
+  var x = document.getElementById(id);
+  if (x.style.display === 'none') {
+    x.style.display = 'block';
+  } else {
+    x.style.display = 'none';
+  }
+}
+```
+
+## Setup  
+
+* Check whether required packages are installed  
+* Clear memory and console  
+* Load packages  
+* Get current script name  
+* Get project folder  
+* Define function(s)  
+
+```{r CHECK PACKAGES, results="hide"}
+source("./source/check_installed_packages.source.R")
+```
+
+
+```{r CLEAN SLATE, results="hide"}
+# Clear memory
+rm(list=setdiff(ls(all=TRUE), c(".Random.seed")))
+# Clear console
+cat("\014")
+```
+
+```{r LOAD PACKAGES, results="hide"}
+library(magrittr)
+library(scales)
+library(dplyr)
+library(mouse430a2.db)
+library(ggplot2)
+```
+
+
+```{r SCRIPT INFO, class.output="txt_output"}
+this.script <- rstudioapi::getActiveDocumentContext()$path %>% basename
+stopifnot(this.script != "")
+cat("Script:", this.script)
+```
+
+```{r PROJECT DIRECTORY, results="asis", include=FALSE}
+cat("Project folder:", rstudioapi::getActiveProject())
+```
+
+
+```{r DT OPTIONS}
+dt.options <- function(x, align="left") {
+  align <- paste0("dt-", align)
+  list(dom="t",
+       columnDefs = list(list(className = align,
+       targets = seq_len(ncol(x))-1)))
+}
+```
+
+
+## Load mean expression data  
+```{r}
+list.files("data")
+fil <- "data/01_Raw_Data_Processing.Rmd.expr_mean.txt"
+stopifnot(file.exists(fil))
+df1 <- read.delim(fil, stringsAsFactors = FALSE)
+head(df1)
+```
+
+## Load gene symbols  
+```{r}
+symbol.file <- "data/05_Figure_1_E.Rmd.data.txt"
+stopifnot(file.exists(symbol.file))
+```
+
+```{r}
+genes <- read.delim(symbol.file, stringsAsFactors = FALSE) %>% 
+  dplyr::arrange(desc(Wt_MMS)) %>% 
+  .$Symbol
+genes
+```
+
+
+## Select Fig. 1E genes  
+```{r results="hide"}
+df2 <- df1 %>% 
+  dplyr::filter(SYMBOL %in% genes) %>% 
+  dplyr::select(-GENENAME)
+dim(df2)
+any(duplicated(df2$SYMBOL)) # TRUE
+head(df2)
+```
+##
+
+
+
+```{r}
+# BiP
+"Hspa5" %in% df3$SYMBOL
+length(grep("Hspa5", df3$SYMBOL)) # 2
+```
+
+```{r}
+subset(df3, SYMBOL=="Hspa5")
+```
+
+```{r}
+df1.anno <- merge(x=df1, y=anno, by.x="ID_REF", by.y = "PROBEID", all=TRUE) %>% 
+  dplyr::select(ID_REF, SYMBOL, everything())
+head(df1.anno)
+```
+
+```{r}
+df1.anno %>% 
+  dplyr::filter(SYMBOL == "Hspa5") %>% 
+  tidyr::pivot_longer(-c("SYMBOL", "ID_REF")) %>% 
+  dplyr::mutate(Treatment = ifelse(grepl("MMS", name), "MMS", "Ctrl")) %>% 
+  dplyr::mutate(Genotype = ifelse(grepl("^WT", name), "WT", "KO")) %>% 
+  dplyr::select(SYMBOL, Genotype, Treatment, value)
+```
+
+
+
+```{r}
+head(df1)
+x <- df1 %>% 
+  dplyr::select(-ID_REF) %>% 
+  dplyr::filter(SYMBOL == "Hspa5") %>% 
+  tidyr::pivot_longer(-SYMBOL) %>% 
+  dplyr::mutate(Treatment = ifelse(grepl("MMS", name), "MMS", "Ctrl")) %>% 
+  dplyr::mutate(Genotype = ifelse(grepl("^Wt", name), "WT", "KO")) %>% 
+  dplyr::select(SYMBOL, Genotype, Treatment, value) %>% 
+  dplyr::group_by(Genotype, Treatment) %>% 
+  dplyr::summarise(Expression = mean(value),
+                   SD = sd(value), .groups = "drop") %>% 
+  dplyr::mutate(Genotype = factor(Genotype, levels = c("WT", "KO"))) %>% 
+  dplyr::mutate(Treatment = factor(Treatment, levels = c("Ctrl", "MMS")))
+x
+```
+
+```{r}
+ggplot(x, aes(x=Genotype, y=Expression, fill=Treatment)) +
+  geom_bar(stat="identity",  position=position_dodge(), , colour="black") +
+  geom_errorbar(aes(ymin=Expression-SD, ymax=Expression+SD), width=.2,
+                 position=position_dodge(.9))
+```
+
+## Session info  
+
+<button class="button" onclick="myFunction('DIV_1')">Show/hide session info</button>
+<div id="DIV_1" class="div_default_hide">
+
+```{r SESSION INFO DATE, results="asis"}
+cat("Date:", format(Sys.time(), "%a %d-%b-%Y %H:%M:%S"), "<br>\n")
+```
+
+```{r print_session_info, R.options=list(width=70)}
+devtools::session_info()
+```
+</div>
+
+```{js}
+var divsToHide = document.getElementsByClassName("div_default_hide");
+for(var i = 0; i < divsToHide.length; i++)
+{
+divsToHide[i].style.display = 'none';
+}
+```

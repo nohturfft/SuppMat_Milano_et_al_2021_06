@@ -1,0 +1,351 @@
+---
+title: "A novel role for alkyladenine DNA glycosylase in regulating alkylation-induced ER stress"
+subtitle: "Figure 1: Preparing expression data"
+author: "L Milano, CF Charlier, R Andreguetti, E Healing, MP Thomé, R Elliott, JY Masson, LD Samson, G Lenz, JAP Henriques, A Nohturfft and LB Meira"
+output:
+  html_notebook:
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 3
+    code_folding: "hide"
+    number_sections: FALSE
+    theme: "readable"
+    highlight: "tango"
+    fig_caption: TRUE
+    css: "./source/styles.css"
+---
+
+```{js}
+function myFunction(id) {
+  var x = document.getElementById(id);
+  if (x.style.display === 'none') {
+    x.style.display = 'block';
+  } else {
+    x.style.display = 'none';
+  }
+}
+```
+
+## Setup  
+
+* Check whether required packages are installed  
+* Clear memory and console  
+* Load packages  
+* Get current script name  
+* Get project folder  
+* Define function(s)  
+
+```{r CHECK PACKAGES, results="hide"}
+source("./source/check_installed_packages.source.R")
+```
+
+
+```{r CLEAN SLATE, results="hide"}
+# Clear memory
+rm(list=setdiff(ls(all=TRUE), c(".Random.seed")))
+# Clear console
+cat("\014")
+```
+
+```{r LOAD PACKAGES, results="hide"}
+library(magrittr)
+library(scales)
+library(dplyr)
+library(mouse430a2.db)
+```
+
+
+```{r SCRIPT INFO, class.output="txt_output"}
+this.script <- rstudioapi::getActiveDocumentContext()$path %>% basename
+stopifnot(this.script != "")
+cat("Script:", this.script)
+```
+
+```{r PROJECT DIRECTORY, results="asis", include=FALSE}
+cat("Project folder:", rstudioapi::getActiveProject())
+```
+
+
+```{r DT OPTIONS}
+dt.options <- function(x, align="left") {
+  align <- paste0("dt-", align)
+  list(dom="t",
+       columnDefs = list(list(className = align,
+       targets = seq_len(ncol(x))-1)))
+}
+```
+
+
+## Load data  
+### Get Affymetrix CEL files  
+
+```{r}
+cel.urls <- paste0("ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM3172nnn/",
+                     c(
+                       "GSM3172738/suppl/GSM3172738_AA423_WT_Ctrl_1.CEL.gz", 
+                       "GSM3172739/suppl/GSM3172739_AA424_WT_Ctrl_2.CEL.gz", 
+                       "GSM3172740/suppl/GSM3172740_AA425_WT_Ctrl_3.CEL.gz", 
+                       "GSM3172741/suppl/GSM3172741_AA426_AagKO_Ctrl_1.CEL.gz", 
+                       "GSM3172742/suppl/GSM3172742_AA427_AagKO_Ctrl_2.CEL.gz", 
+                       "GSM3172743/suppl/GSM3172743_AA428_AagKO_Ctrl_3.CEL.gz", 
+                       "GSM3172744/suppl/GSM3172744_AA429_WT_MMS_1.CEL.gz", 
+                       "GSM3172745/suppl/GSM3172745_AA430_WT_MMS_2.CEL.gz", 
+                       "GSM3172746/suppl/GSM3172746_AA431_WT_MMS_3.CEL.gz", 
+                       "GSM3172747/suppl/GSM3172747_AA432_AagKO_MMS_1.CEL.gz", 
+                       "GSM3172748/suppl/GSM3172748_AA433_AagKO_MMS_2.CEL.gz", 
+                       "GSM3172749/suppl/GSM3172749_AA434_AagKO_MMS_3.CEL.gz"
+                     ))
+```
+
+
+```{r}
+cel.folder <- "cel_files"
+if (!file.exists(cel.folder)) {
+  dir.create(cel.folder)
+}
+cel.files <- list.files(path=cel.folder, pattern = "cel.gz$", ignore.case = TRUE)
+if (!length(cel.files) == 12) {
+  for (cel.url in cel.urls) {
+    dest.file <- paste0("./", cel.folder, "/", basename(cel.url))
+    print(dest.file)
+    download.file(url = cel.url, destfile=dest.file)
+  }
+}
+cel.files <- sort(list.files(path=cel.folder, pattern = "cel.gz$", ignore.case = TRUE, full.names = TRUE))
+stopifnot(length(cel.files) == 12)
+```
+
+
+```{r GET NAMES OF CEL FILES, results="asis"}
+details::details(paste("<tt>", paste(sort(basename(cel.files)), collapse="<br\n>"), "</tt>", sep="\n"),
+                 lang=NULL, summary="Show CEL filenames")
+```
+
+### Read CEL files  
+```{r READ CEL FILES, class.output="txt_output"}
+stopifnot(all(file.exists(cel.files)))
+ab <- affy::ReadAffy(filenames=cel.files)
+Biobase::sampleNames(ab) <- basename(cel.files)
+cat("Size of ", class(ab), ": ", utils:::format.object_size(pryr::object_size(ab), "auto"), sep="") # 81.8 Mb
+```
+
+
+```{r PRINT AFFYBATCH INFO, warning=FALSE}
+print(ab)
+```
+
+```{r REMOVE OBSOLETE VARIABLES}
+rm(cel.files, cel.folder)
+```
+
+
+## Add phenodata to affybatch
+### Define pData  
+```{r}
+pd <- data.frame(sample.name = Biobase::sampleNames(ab),
+                 Genotype=NA,
+                 stringsAsFactors = F)
+pd$Genotype <- ifelse(grepl("WT", pd$sample.name, ignore.case=T), "wt", "ko")
+stopifnot(all(complete.cases(pd)))
+pd$Replicate <- stringr::str_extract(pd$sample.name, "[0-9].CEL.*$") %>% stringr::str_extract(., "^[0-9]")
+pd$Treatment <- ifelse(grepl("Ctrl", pd$sample.name, ignore.case=T), "ctrl", "mms")
+rownames(pd) <- pd$sample.name %>% sub("^.*AA[0-9]{3}_", "", .) %>% sub(".CEL.*$", "", .) %>% sub("^Aag", "", .)
+
+pd <- pd %>% dplyr::select(-sample.name)
+pd %>% 
+  tibble::rownames_to_column("Row Label")
+dput(row.names(pd))
+```
+
+```{r}
+# Check row names:
+expected.row.names <- c("WT_Ctrl_1", "WT_Ctrl_2", "WT_Ctrl_3", "KO_Ctrl_1", "KO_Ctrl_2", 
+"KO_Ctrl_3", "WT_MMS_1", "WT_MMS_2", "WT_MMS_3", "KO_MMS_1", 
+"KO_MMS_2", "KO_MMS_3")
+
+if (!all(expected.row.names %in% row.names(pd))) {
+  stop("Problem with row labels. Later code relies on correct row names as listed in this chunk.")
+}
+```
+
+
+### Define varLabels  
+```{r}
+v.labels <- list(Genotype = "Mpg genotype",
+                 Replicate = "1 to 3 arbitrary numbering",
+                 Treatment = "Control or 6 hours MMS") %>% unlist
+metaData <- data.frame(labelDescription=v.labels)
+metaData %>% 
+  tibble::rownames_to_column("Row Label") %>% 
+  DT::datatable(., options = dt.options(.), rownames = F)
+```
+
+### Compose phenoData:  
+```{r}
+phenoData <- new("AnnotatedDataFrame",
+                 data=pd, varMetadata=metaData)
+Biobase::phenoData(ab) <- phenoData
+# class(Biobase::phenoData(ab)) # "AnnotatedDataFrame"
+Biobase::phenoData(ab)
+```
+
+```{r}
+Biobase::protocolData(ab) <- Biobase::phenoData(ab)
+```
+
+
+```{r}
+rm(v.labels, metaData, phenoData)
+```
+
+
+### Checking: print pData
+```{r}
+Biobase::pData(ab) %>% 
+  tibble::rownames_to_column("Row label") %>% 
+  DT::datatable(., options = dt.options(.), rownames = F)
+```
+
+
+### Save affybatch  
+```{r SAVE AFFYBATCH, class.output="txt_output"}
+if (!file.exists("data")) {
+  dir.create("data")
+}
+out.file.affybatch <- paste0("./data/", this.script, ".affybatch.RDS")
+saveRDS(ab, file=out.file.affybatch, compress=T)
+cat("Saved:", out.file.affybatch)
+rm(out.file.affybatch)
+```
+
+
+## Generate expression set  
+Following instructions in affy vignette (see Info/affy_vignette_2017_04_24.pdf). *"The function expresso performs the steps background correction, normalization, probe specic correction, and summary value computation."* ([Gautier et al., 2004](https://www.ncbi.nlm.nih.gov/pubmed/14960456)).    
+
+```{r GENERATE EXPRESSION SET, results="hide"}
+eset <- affy::expresso(ab,
+                       normalize.method="qspline",
+                       bgcorrect.method="rma",
+                       pmcorrect.method="pmonly",
+                       summary.method="liwong",
+                       verbose = FALSE)
+```
+
+### Save eset  
+```{r SAVING ESET, class.output="txt_output"}
+out.file.eset <- paste0("./data/", this.script, ".eset.RDS")  
+saveRDS(eset, file=out.file.eset, compress=TRUE)
+cat("Saved:", out.file.eset)
+rm(out.file.eset)
+```
+
+### Boxplot of log2 transformed data
+```{r BOXPLOT ESET, message=FALSE, warning=FALSE}
+op <- par()
+colorz <- rep(RColorBrewer::brewer.pal(4, name="Paired"), each=3)
+par(mar=c(7,4,0,2)) # default is (5,4,4,2)
+eset %>% Biobase::exprs(.) %>% log2(.) %>%
+  boxplot(., las=2, col=colorz)
+par(op)
+rm(op)
+```
+
+
+```{r results="hide"}
+expr.df <- eset %>% Biobase::exprs(.) %>% log2(.) %>% as.data.frame %>% tibble::rownames_to_column("ID_REF")
+```
+
+```{r results="hide"}
+# Print first 6 rows:
+head(expr.df)
+```
+
+
+### Save expression table with all replicates:  
+```{r SAVING MATRIX, class.output="txt_output"}
+out.file.expr.all <- paste0("./data/", this.script, ".expr_all.txt")
+write.table(expr.df, file=out.file.expr.all, sep="\t", col.names = T, row.names = F)
+cat("Saved:", out.file.expr.all)
+rm(out.file.expr.all)
+```
+
+## Calculate average expression values  
+### Print first six rows  
+```{r}
+expr.df.means <- expr.df %>% 
+  dplyr::rowwise(ID_REF) %>% 
+  dplyr::mutate(Wt_Ctrl = mean(c_across(starts_with("WT_Ctrl"))),
+         Wt_MMS = mean(c_across(starts_with("WT_MMS"))),
+         Ko_Ctrl = mean(c_across(starts_with("KO_Ctrl"))),
+         Ko_MMS = mean(c_across(starts_with("KO_MMS")))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::select(-starts_with("WT_Ctrl", ignore.case=F)) %>%
+  dplyr::select(-starts_with("WT_MMS", ignore.case=F)) %>% 
+  dplyr::select(-starts_with("KO_Ctrl", ignore.case=F)) %>% 
+  dplyr::select(-starts_with("KO_MMS", ignore.case=F))
+head(expr.df.means) %>% 
+  DT::datatable(., options = dt.options(.), rownames = F) %>% 
+  DT::formatRound(setdiff(names(expr.df.means), "ID_REF"), digits=3)
+```
+
+
+### Add gene annotations  
+```{r results="hide"}
+anno <- AnnotationDbi::select(mouse430a2.db, row.names(eset), c("SYMBOL", "GENENAME"), "PROBEID")
+head(anno)
+```
+
+```{r}
+expr.df.means.anno <- merge(x=anno, y=expr.df.means,
+                              by.x="PROBEID",
+                              by.y="ID_REF", all=TRUE)
+rm(anno)
+```
+
+### Print first six rows  
+```{r}
+head(expr.df.means.anno)
+```
+<div class="comments">
+*Note that probe IDs and gene symbols are no longer unique after adding gene annotations!*
+</div>
+
+```{r class.output="txt_output"}
+cat("Number of duplicated probe IDs: ", comma(sum(duplicated(expr.df.means.anno$PROBEID))), "\n",
+    "Number of duplicated gene symbols: ", comma(sum(duplicated(expr.df.means.anno$SYMBOL))), "\n",
+    "Number of missing probe IDs: ", comma(sum(is.na(expr.df.means.anno$PROBEID))), "\n",
+    "Number of missing gene symbols: ", comma(sum(is.na(expr.df.means.anno$SYMBOL))),
+    sep="")
+```
+
+
+### Save average expression data  
+```{r class.output="txt_output"}
+out.file.expr.all <- paste0("./data/", this.script, ".expr_mean.txt")
+write.table(expr.df.means.anno, file=out.file.expr.all, sep="\t", row.names=FALSE, col.names=TRUE)
+cat("Saved:", out.file.expr.all)
+rm(out.file.expr.all)
+```
+
+
+## Session info  
+
+<button class="button" onclick="myFunction('DIV_1')">Show/hide session info</button>
+<div id="DIV_1" class="div_default_hide">
+
+```{r SESSION INFO DATE, results="asis"}
+cat("Date:", format(Sys.time(), "%a %d-%b-%Y %H:%M:%S"), "<br>\n")
+```
+
+```{r print_session_info, R.options=list(width=70)}
+devtools::session_info()
+```
+</div>
+
+```{js}
+var divsToHide = document.getElementsByClassName("div_default_hide");
+for(var i = 0; i < divsToHide.length; i++)
+{
+divsToHide[i].style.display = 'none';
+}
+```
